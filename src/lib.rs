@@ -7,38 +7,37 @@ pub mod class_helpers;
 use bevy_text::TextStyle;
 pub use widgets::*;
 use bevy_ui::node_bundles::{NodeBundle, ImageBundle, TextBundle, ButtonBundle};
-use bevy_asset::AssetServer;
 use bevy_ecs::entity::Entity;
 use bevy_ecs::system::EntityCommands;
 use bevy_ecs::bundle::Bundle;
 use bevy_hierarchy::{ChildBuilder, BuildChildren};
 
 
-/// Wrapper for [`ChildBuilder`] that also propogates an [`AssetServer`] for the children that need it.
+/// Wrapper for [`ChildBuilder`] that also propogates data for the children that need it.
 // It has enough ' for a lifetime ;)
-pub struct UiChildBuilder<'a, 'b, 'c, 'd> {
+pub struct UiChildBuilder<'a, 'b, 'c, 'd, AssetData> {
     builder: &'a mut ChildBuilder<'b, 'c, 'd>,
-    assets: &'a AssetServer
+    asset_data: &'a AssetData
 }
 
-impl<'a, 'b, 'c, 'd> UiChildBuilder<'a, 'b, 'c, 'd> {
-    pub fn spawn(&mut self, bundle: impl Bundle) -> UiEntityCommands<'a, 'b, 'c, '_> {
+impl<'a, 'b, 'c, 'd, AssetData> UiChildBuilder<'a, 'b, 'c, 'd, AssetData> {
+    pub fn spawn(&mut self, bundle: impl Bundle) -> UiEntityCommands<'a, 'b, 'c, '_, AssetData> {
         let commands: EntityCommands<'b, 'c, '_> = self.builder.spawn(bundle);
         UiEntityCommands {
-            assets: self.assets,
+            asset_data: self.asset_data,
             commands
         }
     }
-    pub fn assets(&self) -> &AssetServer { self.assets }
+    pub fn asset_data(&self) -> &AssetData { self.asset_data }
 }
 
-/// Wrapper for [`EntityCommands`] that also propagates an [`AssetServer`] for the children that need it.
-pub struct UiEntityCommands<'a, 'b, 'c, 'd> {
+/// Wrapper for [`EntityCommands`] that also propagates data for the children that need it.
+pub struct UiEntityCommands<'a, 'b, 'c, 'd, AssetData> {
     commands: EntityCommands<'b, 'c, 'd>,
-    assets: &'a AssetServer
+    asset_data: &'a AssetData
 }
 
-impl<'a, 'b, 'c, 'd> UiEntityCommands<'a, 'b, 'c, 'd> {
+impl<'a, 'b, 'c, 'd, AssetData> UiEntityCommands<'a, 'b, 'c, 'd, AssetData> {
     pub fn id(&self) -> Entity {
         self.commands.id()
     }
@@ -46,10 +45,10 @@ impl<'a, 'b, 'c, 'd> UiEntityCommands<'a, 'b, 'c, 'd> {
         self.commands.insert(bundle);
         self
     }
-    pub fn with_children(mut self, spawn_children: impl FnOnce(&mut UiChildBuilder)) -> Self {
+    pub fn with_children(mut self, spawn_children: impl FnOnce(&mut UiChildBuilder<AssetData>)) -> Self {
         self.commands.with_children(|builder| {
             let mut ui_builder = UiChildBuilder {
-                assets: self.assets,
+                asset_data: self.asset_data,
                 builder
             };
             spawn_children(&mut ui_builder);
@@ -59,127 +58,55 @@ impl<'a, 'b, 'c, 'd> UiEntityCommands<'a, 'b, 'c, 'd> {
 }
 
 /// Something that can overwrite a value, typically a node bundle.
-pub trait Class<B> {
-    fn apply(self, b: &mut B);
+pub trait Class<AssetData, B> {
+    fn apply(self, data: &AssetData, b: &mut B);
 }
 
-impl<T> Class<T> for () {
-    fn apply(self, _b: &mut T) {}
+impl<AssetData, T> Class<AssetData, T> for () {
+    fn apply(self, _a: &AssetData, _b: &mut T) {}
 }
 
-impl<F, B> Class<B> for F
+impl<F, AssetData, B> Class<AssetData, B> for F
 where
-    F: FnOnce(&mut B),
+    F: FnOnce(&AssetData, &mut B)
 {
-    fn apply(self, b: &mut B) {
-        self(b);
-    }
-}
-
-impl<F1, F2, B> Class<B> for (F1, F2)
-where
-    F1: Class<B>,
-    F2: Class<B>,
-{
-    fn apply(self, b: &mut B) {
-        self.0.apply(b);
-        self.1.apply(b);
-    }
-}
-
-impl<F1, F2, F3, B> Class<B> for (F1, F2, F3)
-where
-    F1: Class<B>,
-    F2: Class<B>,
-    F3: Class<B>,
-{
-    fn apply(self, b: &mut B) {
-        self.0.apply(b);
-        self.1.apply(b);
-        self.2.apply(b);
-    }
-}
-
-impl<F1, F2, F3, F4, B> Class<B> for (F1, F2, F3, F4)
-where
-    F1: Class<B>,
-    F2: Class<B>,
-    F3: Class<B>,
-    F4: Class<B>,
-{
-    fn apply(self, b: &mut B) {
-        self.0.apply(b);
-        self.1.apply(b);
-        self.2.apply(b);
-        self.3.apply(b);
-    }
-}
-
-impl Class<NodeBundle> for NodeBundle {
-    fn apply(self, b: &mut NodeBundle) {
-        *b = self;
-    }
-}
-
-impl Class<ImageBundle> for ImageBundle {
-    fn apply(self, b: &mut ImageBundle) {
-        *b = self;
-    }
-}
-
-
-
-/// Something that can overwrite a value, typically a node bundle.
-/// Depends on an [`AssetServer`], unlike [`Class`].
-pub trait AssetClass<B> {
-    fn apply(self, assets: &AssetServer, b: &mut B);
-}
-
-impl<T> AssetClass<T> for () {
-    fn apply(self, _a: &AssetServer, _b: &mut T) {}
-}
-
-impl<F, B> AssetClass<B> for F
-where
-    F: FnOnce(&AssetServer, &mut B)
-{
-    fn apply(self, a: &AssetServer, b: &mut B) {
+    fn apply(self, a: &AssetData, b: &mut B) {
         self(a, b);
     }
 }
 
-impl<F1, F2, B> AssetClass<B> for (F1, F2)
+impl<F1, F2, AssetData, B> Class<AssetData, B> for (F1, F2)
 where
-    F1: AssetClass<B>,
-    F2: AssetClass<B>,
+    F1: Class<AssetData, B>,
+    F2: Class<AssetData, B>,
 {
-    fn apply(self, a: &AssetServer, b: &mut B) {
+    fn apply(self, a: &AssetData, b: &mut B) {
         self.0.apply(a, b);
         self.1.apply(a, b);
     }
 }
 
-impl<F1, F2, F3, B> AssetClass<B> for (F1, F2, F3)
+impl<F1, F2, F3, AssetData, B> Class<AssetData, B> for (F1, F2, F3)
 where
-    F1: AssetClass<B>,
-    F2: AssetClass<B>,
-    F3: AssetClass<B>,
+    F1: Class<AssetData, B>,
+    F2: Class<AssetData, B>,
+    F3: Class<AssetData, B>,
 {
-    fn apply(self, a: &AssetServer, b: &mut B) {
+    fn apply(self, a: &AssetData, b: &mut B) {
         self.0.apply(a, b);
         self.1.apply(a, b);
         self.2.apply(a, b);
     }
 }
 
-impl<F1, F2, F3, F4, B> AssetClass<B> for (F1, F2, F3, F4)
+impl<F1, F2, F3, F4, AssetData, B> Class<AssetData, B> for (F1, F2, F3, F4)
 where
-    F1: AssetClass<B>,
-    F2: AssetClass<B>,
-    F3: AssetClass<B>,
-    F4: AssetClass<B>,
+    F1: Class<AssetData, B>,
+    F2: Class<AssetData, B>,
+    F3: Class<AssetData, B>,
+    F4: Class<AssetData, B>,
 {
-    fn apply(self, a: &AssetServer, b: &mut B) {
+    fn apply(self, a: &AssetData, b: &mut B) {
         self.0.apply(a, b);
         self.1.apply(a, b);
         self.2.apply(a, b);
@@ -187,20 +114,32 @@ where
     }
 }
 
-impl AssetClass<ButtonBundle> for ButtonBundle {
-    fn apply(self, _a: &AssetServer, b: &mut ButtonBundle) {
+impl<AssetData> Class<AssetData, NodeBundle> for NodeBundle {
+    fn apply(self, _a: &AssetData, b: &mut NodeBundle) {
         *b = self;
     }
 }
 
-impl AssetClass<TextBundle> for TextBundle {
-    fn apply(self, _a: &AssetServer, b: &mut TextBundle) {
+impl<AssetData> Class<AssetData, ImageBundle> for ImageBundle {
+    fn apply(self, _a: &AssetData, b: &mut ImageBundle) {
         *b = self;
     }
 }
 
-impl AssetClass<TextStyle> for TextStyle {
-    fn apply(self, _a: &AssetServer, b: &mut TextStyle) {
+impl<AssetData> Class<AssetData, ButtonBundle> for ButtonBundle {
+    fn apply(self, _a: &AssetData, b: &mut ButtonBundle) {
+        *b = self;
+    }
+}
+
+impl<AssetData> Class<AssetData, TextBundle> for TextBundle {
+    fn apply(self, _a: &AssetData, b: &mut TextBundle) {
+        *b = self;
+    }
+}
+
+impl<AssetData> Class<AssetData, TextStyle> for TextStyle {
+    fn apply(self, _a: &AssetData, b: &mut TextStyle) {
         *b = self;
     }
 }
